@@ -1,0 +1,65 @@
+name: test-sftp
+on:
+  workflow_dispatch:
+    inputs:
+      remote_dir:
+        description: "Cartella del repo sul server (es. bookworm)"
+        default: bookworm
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    env:
+      SFTP_HOST: ${{ secrets.SFTP_HOST }}
+      SFTP_USER: ${{ secrets.SFTP_USER }}
+      SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+      REMOTE_DIR: ${{ inputs.remote_dir }}
+    steps:
+      - name: Installa lftp e mostra l'IP del runner
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lftp
+          echo "IP in uscita: $(curl -fsS https://api.ipify.org)"
+
+      - name: Impronta del server
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "$SFTP_HOST" >> ~/.ssh/known_hosts
+
+      - name: Scarica conf, db e dists
+        run: |
+          mkdir -p work
+          time lftp -u "$SFTP_USER,$SFTP_PASSWORD" "sftp://$SFTP_HOST" <<EOF
+          set cmd:fail-exit yes
+          set net:max-retries 3
+          set net:timeout 20
+          mirror --parallel=1 "$REMOTE_DIR/conf"  work/conf
+          mirror --parallel=1 "$REMOTE_DIR/db"    work/db
+          mirror --parallel=1 "$REMOTE_DIR/dists" work/dists
+          bye
+          EOF
+          du -sh work/*
+
+      - name: Upload, download e confronto di un file di prova
+        run: |
+          head -c 5M /dev/urandom > probe.bin
+          time lftp -u "$SFTP_USER,$SFTP_PASSWORD" "sftp://$SFTP_HOST" <<EOF
+          set cmd:fail-exit yes
+          set net:max-retries 3
+          set net:timeout 20
+          mkdir -p _ci_test
+          put probe.bin -o _ci_test/probe.bin
+          get _ci_test/probe.bin -o probe.back
+          bye
+          EOF
+          cmp probe.bin probe.back && echo "Upload/download: file identico"
+
+      - name: Pulizia della cartella di scarto
+        if: always()
+        run: |
+          lftp -u "$SFTP_USER,$SFTP_PASSWORD" "sftp://$SFTP_HOST" <<EOF || true
+          rm -f _ci_test/probe.bin
+          rmdir _ci_test
+          bye
+          EOF
