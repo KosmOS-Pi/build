@@ -8,6 +8,13 @@ on:
       ref:
         description: "Branch or tag to build"
         default: debian/latest
+      repo_dir:
+        description: "Repo folder on server"
+        default: trixie
+      include_dbgsym:
+        description: "Publish -dbgsym packages too"
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -27,14 +34,11 @@ jobs:
           path: src
 
       - name: Version from changelog
+        if: hashFiles('src/debian/changelog') != ''
         working-directory: src
         run: |
           echo "Version: $(dpkg-parsechangelog -S Version)"
           echo "Distribution: $(dpkg-parsechangelog -S Distribution)"
-
-      - name: Install build deps
-        working-directory: src
-        run: mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control
 
       - name: Build
         working-directory: src
@@ -52,7 +56,7 @@ jobs:
             mv ../*.deb "$OUT_DIR"/
           fi
           ls "$OUT_DIR"/*.deb
-		  
+
       - name: Packages check
         run: |
           for f in out/*.deb; do
@@ -68,3 +72,102 @@ jobs:
         with:
           name: debs-${{ inputs.package }}
           path: out/*.deb
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    concurrency:
+      group: kosmos-repo
+      cancel-in-progress: false
+    env:
+      SFTP_HOST: ${{ secrets.SFTP_HOST }}
+      SFTP_USER: ${{ secrets.SFTP_USER }}
+      SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+      REPO_DIR: ${{ inputs.repo_dir }}
+      CODENAME: trixie-testing
+    steps:
+      - name: Tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            reprepro lftp openssh-client ca-certificates
+          reprepro --version
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-${{ inputs.package }}
+          path: debs
+
+      - name: Packages check
+        run: |
+          if [ "${{ inputs.include_dbgsym }}" != "true" ]; then
+            rm -f debs/*-dbgsym_*.deb
+          fi
+          ls debs/*.deb
+          for deb in debs/*.deb; do
+            name=$(dpkg-deb -f "$deb" Package)
+            ver=$(dpkg-deb -f "$deb" Version)
+            case "$name" in kosmos-*) continue ;; esac
+            echo "$ver" | grep -Eq '\+kosmos-[0-9]+~deb13$' \
+              || { echo "Invalid version: $name $ver"; exit 1; }
+          done
+
+      - name: Download conf, db and dists from testing
+        run: |
+          mkdir -p ~/.ssh work
+          ssh-keyscan -H "$SFTP_HOST" >> ~/.ssh/known_hosts
+          lftp -u "$SFTP_USER,$SFTP_PASSWORD" "sftp://$SFTP_HOST" <<EOF
+          set cmd:fail-exit yes
+          set net:max-retries 3
+          set net:timeout 20
+          mirror --parallel=1 "$REPO_DIR/conf" work/conf
+          mirror --parallel=1 "$REPO_DIR/db" work/db
+          mirror --parallel=1 "$REPO_DIR/dists/$CODENAME" "work/dists/$CODENAME"
+          bye
+          EOF
+
+      - name: DB backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: work/db
+          retention-days: 14
+
+      - name: Included packages
+        id: inc
+        run: |
+          cd work
+          mkdir -p pool
+          added=false
+          for deb in ../debs/*.deb; do
+            name=$(dpkg-deb -f "$deb" Package)
+            ver=$(dpkg-deb -f "$deb" Version)
+            cur=$(reprepro -b . list "$CODENAME" "$name" | cut -d' ' -f3)
+            if [ "$cur" = "$ver" ]; then
+              echo "skip $name $ver (already there)"
+              continue
+            fi
+            echo "add   $name $ver"
+            reprepro -b . --export=never includedeb "$CODENAME" "$deb"
+            added=true
+          done
+          echo "added=$added" >> "$GITHUB_OUTPUT"
+
+      - name: Export testing indexes
+        if: steps.inc.outputs.added == 'true'
+        run: reprepro -b work export "$CODENAME"
+
+      - name: Upload on server (pool, db, dists, in fixed order)
+        if: steps.inc.outputs.added == 'true'
+        run: |
+          cd work
+          lftp -u "$SFTP_USER,$SFTP_PASSWORD" "sftp://$SFTP_HOST" <<EOF
+          set cmd:fail-exit yes
+          set net:max-retries 3
+          set net:timeout 20
+          mirror -R --only-missing --parallel=1 pool "$REPO_DIR/pool"
+          mirror -R --delete --parallel=1 --exclude lockfile db "$REPO_DIR/db"
+          mirror -R --delete --parallel=1 "dists/$CODENAME" "$REPO_DIR/dists/$CODENAME"
+          bye
+          EOF
