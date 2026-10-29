@@ -1,0 +1,60 @@
+name: build-package
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Repo del pacchetto (es. dpkg-libxisf)"
+        required: true
+      ref:
+        description: "Ramo o tag da compilare"
+        default: debian/latest
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    steps:
+      - name: Strumenti
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates build-essential devscripts equivs fakeroot
+
+      - uses: actions/checkout@v4
+        with:
+          repository: KosmOS-Pi/${{ inputs.package }}
+          ref: ${{ inputs.ref }}
+          path: src
+
+      - name: Versione dal changelog
+        working-directory: src
+        run: |
+          echo "Versione: $(dpkg-parsechangelog -S Version)"
+          echo "Distribuzione: $(dpkg-parsechangelog -S Distribution)"
+
+      - name: Dipendenze di build
+        working-directory: src
+        run: mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control
+
+      - name: Build
+        working-directory: src
+        run: |
+          dpkg-buildpackage -us -uc -b -j"$(nproc)"
+          mkdir -p ../out
+          mv ../*.deb ../out/
+
+      - name: Controllo dei pacchetti
+        run: |
+          for f in out/*.deb; do
+            echo "== $f"
+            dpkg-deb -I "$f" | grep -E "Package|Version|Depends"
+          done
+          for lib in $(find src/debian -name '*.so*' -type f 2>/dev/null); do
+            echo "== NEEDED di $lib"
+            readelf -d "$lib" | grep NEEDED
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-${{ inputs.package }}
+          path: out/*.deb
