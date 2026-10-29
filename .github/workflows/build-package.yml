@@ -3,10 +3,10 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: "Repo del pacchetto (es. dpkg-libxisf)"
+        description: "Package repo (ex. dpkg-libxisf)"
         required: true
       ref:
-        description: "Ramo o tag da compilare"
+        description: "Branch or tag to build"
         default: debian/latest
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     container: debian:trixie
     steps:
-      - name: Strumenti
+      - name: Tools
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
@@ -26,13 +26,13 @@ jobs:
           ref: ${{ inputs.ref }}
           path: src
 
-      - name: Versione dal changelog
+      - name: Version from changelog
         working-directory: src
         run: |
-          echo "Versione: $(dpkg-parsechangelog -S Version)"
-          echo "Distribuzione: $(dpkg-parsechangelog -S Distribution)"
+          echo "Version: $(dpkg-parsechangelog -S Version)"
+          echo "Distribution: $(dpkg-parsechangelog -S Distribution)"
 
-      - name: Dipendenze di build
+      - name: Build deps
         working-directory: src
         run: mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control
 
@@ -43,7 +43,7 @@ jobs:
           mkdir -p ../out
           mv ../*.deb ../out/
 
-      - name: Controllo dei pacchetti
+      - name: Packages check
         run: |
           for f in out/*.deb; do
             echo "== $f"
