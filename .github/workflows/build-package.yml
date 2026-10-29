@@ -32,17 +32,27 @@ jobs:
           echo "Version: $(dpkg-parsechangelog -S Version)"
           echo "Distribution: $(dpkg-parsechangelog -S Distribution)"
 
-      - name: Build deps
+      - name: Install build deps
         working-directory: src
         run: mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control
 
       - name: Build
         working-directory: src
+        env:
+          OUT_DIR: ${{ github.workspace }}/out
+          SRC_DIR: ${{ github.workspace }}/src
         run: |
-          dpkg-buildpackage -us -uc -b -j"$(nproc)"
-          mkdir -p ../out
-          mv ../*.deb ../out/
-
+          mkdir -p "$OUT_DIR"
+          if [ -f debian/ci/build.sh ]; then
+            echo "Custom build: debian/ci/build.sh"
+            bash debian/ci/build.sh
+          else
+            mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control
+            dpkg-buildpackage -us -uc -b -j"$(nproc)"
+            mv ../*.deb "$OUT_DIR"/
+          fi
+          ls "$OUT_DIR"/*.deb
+		  
       - name: Packages check
         run: |
           for f in out/*.deb; do
