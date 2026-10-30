@@ -27,7 +27,7 @@ jobs:
           apt-get install -y --no-install-recommends \
             git ca-certificates build-essential devscripts equivs fakeroot
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: KosmOS-Pi/${{ inputs.package }}
           ref: ${{ inputs.ref }}
@@ -68,7 +68,7 @@ jobs:
             readelf -d "$lib" | grep NEEDED
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: debs-${{ inputs.package }}
           path: out/*.deb
@@ -95,7 +95,7 @@ jobs:
             reprepro lftp openssh-client ca-certificates
           reprepro --version
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: debs-${{ inputs.package }}
           path: debs
@@ -130,7 +130,7 @@ jobs:
           EOF
 
       - name: DB backup
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: db-backup-${{ github.run_id }}
           path: work/db
