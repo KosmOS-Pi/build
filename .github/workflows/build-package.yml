@@ -116,7 +116,9 @@ jobs:
       - name: Download conf, db and dists from testing
         run: |
           mkdir -p ~/.ssh work
-          ssh-keyscan -H "$SFTP_HOST" >> ~/.ssh/known_hosts
+          ssh-keyscan -T 15 -H "$SFTP_HOST" >> ~/.ssh/known_hosts
+          echo "known_hosts lines: $(wc -l < ~/.ssh/known_hosts)"
+          test -s ~/.ssh/known_hosts || { echo "ssh-keyscan returned no keys"; exit 1; }
           lftp -u "$SFTP_USER,$SFTP_PASSWORD" "sftp://$SFTP_HOST" <<EOF
           set cmd:fail-exit yes
           set net:max-retries 3
