@@ -14,6 +14,7 @@ jobs:
       SFTP_HOST: ${{ secrets.SFTP_HOST }}
       SFTP_USER: ${{ secrets.SFTP_USER }}
       SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+      SFTP_KNOWN_HOSTS: ${{ secrets.SFTP_KNOWN_HOSTS }}
       REMOTE_DIR: ${{ inputs.remote_dir }}
     steps:
       - name: Installa lftp e mostra l'IP del runner
@@ -25,7 +26,8 @@ jobs:
       - name: Impronta del server
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H "$SFTP_HOST" >> ~/.ssh/known_hosts
+          printf '%s\n' "$SFTP_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts || { echo "SFTP_KNOWN_HOSTS is empty"; exit 1; }
 
       - name: Scarica conf, db e dists
         run: |

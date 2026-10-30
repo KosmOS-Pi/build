@@ -84,6 +84,7 @@ jobs:
       SFTP_HOST: ${{ secrets.SFTP_HOST }}
       SFTP_USER: ${{ secrets.SFTP_USER }}
       SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+      SFTP_KNOWN_HOSTS: ${{ secrets.SFTP_KNOWN_HOSTS }}
       REPO_DIR: ${{ inputs.repo_dir }}
       CODENAME: trixie-testing
     steps:
@@ -116,8 +117,8 @@ jobs:
       - name: Download conf, db and dists from testing
         run: |
           mkdir -p /root/.ssh work
-          ssh-keyscan -T 15 -H "$SFTP_HOST" >> /root/.ssh/known_hosts
-          test -s /root/.ssh/known_hosts || { echo "ssh-keyscan returned no keys"; exit 1; }
+          printf '%s\n' "$SFTP_KNOWN_HOSTS" > /root/.ssh/known_hosts
+          test -s /root/.ssh/known_hosts || { echo "SFTP_KNOWN_HOSTS is empty"; exit 1; }
           lftp -u "$SFTP_USER,$SFTP_PASSWORD" "sftp://$SFTP_HOST" <<EOF
           set cmd:fail-exit yes
           set net:max-retries 3
