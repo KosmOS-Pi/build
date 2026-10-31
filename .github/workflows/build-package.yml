@@ -116,7 +116,7 @@ jobs:
             echo "$ver" | grep -Eq -- "$re" \
               || { echo "Invalid version: $name $ver (expected: $re)"; exit 1; }
           done
-		  
+
       - name: Download conf, db and dists from testing
         run: |
           mkdir -p /root/.ssh work
