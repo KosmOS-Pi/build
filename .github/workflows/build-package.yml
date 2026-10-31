@@ -109,11 +109,14 @@ jobs:
           for deb in debs/*.deb; do
             name=$(dpkg-deb -f "$deb" Package)
             ver=$(dpkg-deb -f "$deb" Version)
-            case "$name" in kosmos-*) continue ;; esac
-            echo "$ver" | grep -Eq '\+kosmos-[0-9]+~deb13$' \
-              || { echo "Invalid version: $name $ver"; exit 1; }
+            case "$name" in
+              kosmos-*) re='-[0-9]+~deb13$' ;;
+              *)        re='\+kosmos-[0-9]+~deb13$' ;;
+            esac
+            echo "$ver" | grep -Eq -- "$re" \
+              || { echo "Invalid version: $name $ver (expected: $re)"; exit 1; }
           done
-
+		  
       - name: Download conf, db and dists from testing
         run: |
           mkdir -p /root/.ssh work
