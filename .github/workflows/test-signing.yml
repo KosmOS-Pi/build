@@ -1,0 +1,55 @@
+name: test-signing
+on:
+  workflow_dispatch:
+    inputs:
+      subkey_fingerprint:
+        description: "Fingerprint of the signing subkey (40 hex chars, no spaces)"
+        required: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    timeout-minutes: 10
+    environment: apt-signing
+    env:
+      APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+      SUBKEY_FPR: ${{ inputs.subkey_fingerprint }}
+      LC_ALL: C
+    steps:
+      - name: Tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends gnupg
+          gpg --version | head -1
+
+      - name: Import the key in a temporary keyring
+        run: |
+          test -n "$APT_SIGNING_KEY" || { echo "APT_SIGNING_KEY is empty"; exit 1; }
+          GNUPGHOME=$(mktemp -d)
+          chmod 700 "$GNUPGHOME"
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          printf '%s\n' "$APT_SIGNING_KEY" | GNUPGHOME="$GNUPGHOME" gpg --batch --import
+
+      - name: Show keys (the primary key must be absent)
+        run: |
+          gpg --list-secret-keys --keyid-format long --with-subkey-fingerprints | tee keys.txt
+          grep -q '^sec#' keys.txt || { echo "Primary key is NOT a stub: unexpected"; exit 1; }
+          grep -q "$SUBKEY_FPR" keys.txt || { echo "Subkey fingerprint not found in keyring"; exit 1; }
+
+      - name: Sign a test string without passphrase
+        run: |
+          echo "kosmos signing test" | gpg --batch --pinentry-mode error \
+            --local-user "$SUBKEY_FPR" --clearsign > test.asc
+          cat test.asc
+
+      - name: Verify the signature and show the signer
+        run: |
+          gpg --verify --verbose test.asc 2>&1 | tee verify.txt
+          grep -q "Good signature" verify.txt
+
+      - name: Cleanup
+        if: always()
+        run: |
+          gpgconf --kill gpg-agent || true
+          rm -rf "$GNUPGHOME" keys.txt verify.txt test.asc
