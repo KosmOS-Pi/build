@@ -1,0 +1,85 @@
+name: build-image
+on:
+  workflow_dispatch:
+    inputs:
+      pigen_ref:
+        description: "Branch or tag of KosmOS-Pi/pi-gen"
+        default: kosmos-trixie
+      release:
+        description: "Publish the image as a test pre-release"
+        type: boolean
+        default: false
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - name: Disk and host info (before)
+        run: |
+          df -h /
+          nproc
+          free -h
+          lsb_release -ds
+          uname -m
+
+      - uses: actions/checkout@v7
+        with:
+          repository: KosmOS-Pi/pi-gen
+          ref: ${{ inputs.pigen_ref }}
+          path: pi-gen
+
+      - name: Install dependencies listed in pi-gen/depends
+        run: |
+          cat pi-gen/depends
+          sudo apt-get update -qq
+          grep -v '^[[:space:]]*$' pi-gen/depends | sed 's/^.*://' \
+            | xargs sudo apt-get install -y -qq --no-install-recommends
+
+      - name: Check debootstrap can build trixie
+        run: |
+          debootstrap --version
+          ls /usr/share/debootstrap/scripts | grep -x trixie || echo "No trixie script in debootstrap"
+          dpkg -l debian-archive-keyring | tail -1
+          ls -l /usr/share/keyrings | grep -i debian || true
+
+      - name: Show pi-gen config
+        run: |
+          cat pi-gen/config
+          git -C pi-gen log -1 --oneline
+
+      - name: Build image
+        working-directory: pi-gen
+        run: |
+          time sudo ./build.sh -c config
+
+      - name: Disk and result (after)
+        if: always()
+        run: |
+          df -h /
+          ls -lh pi-gen/deploy/ || true
+
+      - name: Checksums
+        run: |
+          cd pi-gen/deploy
+          sha256sum *.img.xz | tee SHA256SUMS
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pigen-log-${{ github.run_id }}
+          path: pi-gen/work/*/build.log
+          retention-days: 7
+
+      - name: Publish test pre-release
+        if: inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="image-test-${{ github.run_number }}"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --prerelease \
+            --title "Test image $tag" --notes "Test image, not for users." \
+            pi-gen/deploy/*.img.xz pi-gen/deploy/SHA256SUMS
