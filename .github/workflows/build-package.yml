@@ -65,7 +65,7 @@ jobs:
           done
           for lib in $(find src/debian -name '*.so*' -type f 2>/dev/null); do
             echo "== NEEDED di $lib"
-            readelf -d "$lib" | grep NEEDED
+            readelf -d "$lib" 2> /dev/null | grep NEEDED || echo "Not a shared lib."
           done
 
       - uses: actions/upload-artifact@v7
