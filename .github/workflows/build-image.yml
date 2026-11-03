@@ -64,7 +64,7 @@ jobs:
       - name: Checksums
         run: |
           cd pi-gen/deploy
-          sha256sum *.img.xz | tee SHA256SUMS
+          sha256sum *.img.xz | tee ../../SHA256SUMS
 
       - name: Upload build log on failure
         if: failure()
@@ -82,4 +82,4 @@ jobs:
           tag="image-test-${{ github.run_number }}"
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --prerelease \
             --title "Test image $tag" --notes "Test image, not for users." \
-            pi-gen/deploy/*.img.xz pi-gen/deploy/SHA256SUMS
+            pi-gen/deploy/*.img.xz SHA256SUMS
