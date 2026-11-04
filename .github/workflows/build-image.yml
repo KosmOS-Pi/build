@@ -59,6 +59,7 @@ jobs:
         if: always()
         run: |
           df -h /
+          ls -lh pi-gen/ || true
           ls -lh pi-gen/deploy/ || true
 
       - name: Checksums
