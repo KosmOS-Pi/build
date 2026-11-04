@@ -62,10 +62,26 @@ jobs:
           ls -lh pi-gen/deploy/ || true
 
       - name: Checksums
+        id: image_data
         run: |
           cd pi-gen/deploy
-          ls -l
-          sha256sum *.img.xz | tee ../../SHA256SUMS
+          UNCOMPRESSED_IMG=$(ls image_*-kosmos-trixie-arm64-lite.img)
+          UNCOMPRESSED_SIZE=$(stat -c%s "$UNCOMPRESSED_IMG")
+          UNCOMPRESSED_SHA=$(sha256sum "$UNCOMPRESSED_IMG" | awk '{print $1}')
+          echo "Compressing image..."
+          xz -T 0 -9 "$UNCOMPRESSED_IMG"
+          COMPRESSED_IMG="${UNCOMPRESSED_IMG}.xz"
+          COMPRESSED_SIZE=$(stat -c%s "$COMPRESSED_IMG")
+          echo "$UNCOMPRESSED_SHA  $UNCOMPRESSED_IMG" > ../../SHA256SUMS
+          sha256sum *.img.xz | tee -a ../../SHA256SUMS
+          echo "download_file=$COMPRESSED_IMG" >> $GITHUB_OUTPUT
+          echo "download_size=$COMPRESSED_SIZE" >> $GITHUB_OUTPUT
+          echo "extract_size=$UNCOMPRESSED_SIZE" >> $GITHUB_OUTPUT
+          echo "extract_sha256=$UNCOMPRESSED_SHA" >> $GITHUB_OUTPUT
+          echo "download_file=$COMPRESSED_IMG"
+          echo "download_size=$COMPRESSED_SIZE"
+          echo "extract_size=$UNCOMPRESSED_SIZE"
+          echo "extract_sha256=$UNCOMPRESSED_SHA"
 
       - name: Upload build log on failure
         if: failure()
