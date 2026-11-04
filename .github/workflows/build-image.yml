@@ -65,7 +65,7 @@ jobs:
         id: image_data
         run: |
           cd pi-gen/deploy
-          UNCOMPRESSED_IMG=$(ls image_*-kosmos-trixie-arm64-lite.img)
+          UNCOMPRESSED_IMG=$(ls *-kosmos-trixie-arm64-lite.img)
           UNCOMPRESSED_SIZE=$(stat -c%s "$UNCOMPRESSED_IMG")
           UNCOMPRESSED_SHA=$(sha256sum "$UNCOMPRESSED_IMG" | awk '{print $1}')
           echo "Compressing image..."
