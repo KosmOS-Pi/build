@@ -64,7 +64,7 @@ jobs:
       - name: Checksums
         run: |
           cd pi-gen/deploy
-		  ls -l
+          ls -l
           sha256sum *.img.xz | tee ../../SHA256SUMS
 
       - name: Upload build log on failure
