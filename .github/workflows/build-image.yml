@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: write
+    env:
+      TAG: image-test-${{ github.run_number }}
     steps:
       - name: Disk and host info (before)
         run: |
@@ -30,6 +32,11 @@ jobs:
           repository: KosmOS-Pi/pi-gen
           ref: ${{ inputs.pigen_ref }}
           path: pi-gen
+
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: imager
+          path: build
 
       - name: Install dependencies listed in pi-gen/depends
         run: |
@@ -60,29 +67,38 @@ jobs:
         run: |
           df -h /
           ls -lh pi-gen/deploy/ || true
-
-      - name: Checksums
-        id: image_data
-        run: |
           sudo chown -R runner:runner pi-gen/deploy
+
+      - name: Uncompressed Checksums
+        id: uncompressed_data
+        run: |
           cd pi-gen/deploy
           UNCOMPRESSED_IMG=$(ls *-kosmos-trixie-arm64-lite.img)
           UNCOMPRESSED_SIZE=$(stat -c%s "$UNCOMPRESSED_IMG")
           UNCOMPRESSED_SHA=$(sha256sum "$UNCOMPRESSED_IMG" | awk '{print $1}')
+          echo "extract_size=$UNCOMPRESSED_SIZE" | tee -a $GITHUB_OUTPUT
+          echo "extract_sha256=$UNCOMPRESSED_SHA" | tee -a $GITHUB_OUTPUT
+
+      - name: Compression and Checksums
+        id: compressed_data
+        run: |
+          cd pi-gen/deploy
+          UNCOMPRESSED_IMG=$(ls *-kosmos-trixie-arm64-lite.img)
           echo "Compressing image..."
           xz -T 0 -9 "$UNCOMPRESSED_IMG"
           COMPRESSED_IMG="image_${UNCOMPRESSED_IMG}.xz"
           mv "${UNCOMPRESSED_IMG}.xz" "${COMPRESSED_IMG}"
           COMPRESSED_SIZE=$(stat -c%s "$COMPRESSED_IMG")
+          COMPRESSED_SHA=$(sha256sum "$COMPRESSED_IMG" | awk '{print $1}')
           sha256sum *.img.xz | tee SHA256SUMS
-          echo "download_file=$COMPRESSED_IMG" >> $GITHUB_OUTPUT
-          echo "download_size=$COMPRESSED_SIZE" >> $GITHUB_OUTPUT
-          echo "extract_size=$UNCOMPRESSED_SIZE" >> $GITHUB_OUTPUT
-          echo "extract_sha256=$UNCOMPRESSED_SHA" >> $GITHUB_OUTPUT
-          echo "download_file=$COMPRESSED_IMG"
-          echo "download_size=$COMPRESSED_SIZE"
-          echo "extract_size=$UNCOMPRESSED_SIZE"
-          echo "extract_sha256=$UNCOMPRESSED_SHA"
+          echo "download_file=$COMPRESSED_IMG" | tee -a $GITHUB_OUTPUT
+          echo "download_size=$COMPRESSED_SIZE" | tee -a $GITHUB_OUTPUT
+          echo "download_sha256=$COMPRESSED_SHA" | tee -a $GITHUB_OUTPUT
+
+      - name: Imager json
+        run: |
+          cd pi-gen/deploy
+          <<< kosmos.json production >>>
 
       - name: Upload build log on failure
         if: failure()
@@ -100,4 +116,4 @@ jobs:
           tag="image-test-${{ github.run_number }}"
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --prerelease \
             --title "Test image $tag" --notes "Test image, not for users." \
-            pi-gen/deploy/*.img.xz pi-gen/deploy/SHA256SUMS
+            pi-gen/deploy/*.img.xz pi-gen/deploy/SHA256SUMS pi-gen/deploy/kosmos.json
