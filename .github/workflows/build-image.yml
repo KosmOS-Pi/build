@@ -96,9 +96,38 @@ jobs:
           echo "download_sha256=$COMPRESSED_SHA" | tee -a $GITHUB_OUTPUT
 
       - name: Imager json
+        env:
+          DOWNLOAD_FILE: ${{ steps.compressed_data.outputs.download_file }}
+          DOWNLOAD_SIZE: ${{ steps.compressed_data.outputs.download_size }}
+          DOWNLOAD_SHA256: ${{ steps.compressed_data.outputs.download_sha256 }}
+          EXTRACT_SIZE: ${{ steps.uncompressed_data.outputs.extract_size }}
+          EXTRACT_SHA256: ${{ steps.uncompressed_data.outputs.extract_sha256 }}
         run: |
-          cd pi-gen/deploy
-          <<< kosmos.json production >>>
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${DOWNLOAD_FILE}"
+          jq \
+            --arg url "$URL" \
+            --arg date "$(date -u +%F)" \
+            --arg esha "$EXTRACT_SHA256" \
+            --arg dsha "$DOWNLOAD_SHA256" \
+            --argjson esize "$EXTRACT_SIZE" \
+            --argjson dsize "$DOWNLOAD_SIZE" \
+            '.os_list[0] += {
+               url: $url,
+               release_date: $date,
+               extract_size: $esize,
+               extract_sha256: $esha,
+               image_download_size: $dsize,
+               image_download_sha256: $dsha
+             }' build/imager/kosmos-template.json > pi-gen/deploy/kosmos.json
+
+          # Fail if something is empty or zero
+          jq -e '.os_list[0]
+                 | (.url | length > 0)
+                 and (.extract_size > 0) and (.image_download_size > 0)
+                 and (.extract_sha256 | length == 64)
+                 and (.image_download_sha256 | length == 64)' \
+            pi-gen/deploy/kosmos.json > /dev/null
+          cat pi-gen/deploy/kosmos.json
 
       - name: Upload build log on failure
         if: failure()
