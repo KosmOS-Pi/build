@@ -1,0 +1,25 @@
+Origin: KosmOS
+Label: KosmOS Custom Repository
+Codename: trixie
+Suite: kosmos
+Components: main
+Architectures: arm64
+Description: KosmOS current version packages repository
+SignWith: BBDA5C0BB5335948A4BD85642B9A5AC9BBF982E6
+
+Origin: KosmOS
+Label: KosmOS Custom Repository
+Codename: trixie-old
+Suite: kosmos-old
+Components: main
+Architectures: arm64
+Description: KosmOS previous version packages repository
+SignWith: BBDA5C0BB5335948A4BD85642B9A5AC9BBF982E6
+
+Origin: KosmOS
+Label: KosmOS Custom Repository
+Codename: trixie-testing
+Suite: kosmos-testing
+Components: main
+Architectures: arm64
+Description: KosmOS packages test repository
