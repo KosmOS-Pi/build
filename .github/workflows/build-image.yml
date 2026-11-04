@@ -64,7 +64,7 @@ jobs:
       - name: Checksums
         id: image_data
         run: |
-          sudo chown runner:runner pi-gen/deploy
+          sudo chown -R runner:runner pi-gen/deploy
           cd pi-gen/deploy
           UNCOMPRESSED_IMG=$(ls *-kosmos-trixie-arm64-lite.img)
           UNCOMPRESSED_SIZE=$(stat -c%s "$UNCOMPRESSED_IMG")
