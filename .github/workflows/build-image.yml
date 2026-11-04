@@ -59,12 +59,12 @@ jobs:
         if: always()
         run: |
           df -h /
-          ls -lh pi-gen/ || true
           ls -lh pi-gen/deploy/ || true
 
       - name: Checksums
         id: image_data
         run: |
+          sudo chown runner:runner pi-gen/deploy
           cd pi-gen/deploy
           UNCOMPRESSED_IMG=$(ls *-kosmos-trixie-arm64-lite.img)
           UNCOMPRESSED_SIZE=$(stat -c%s "$UNCOMPRESSED_IMG")
@@ -73,8 +73,7 @@ jobs:
           xz -T 0 -9 "$UNCOMPRESSED_IMG"
           COMPRESSED_IMG="${UNCOMPRESSED_IMG}.xz"
           COMPRESSED_SIZE=$(stat -c%s "$COMPRESSED_IMG")
-          echo "$UNCOMPRESSED_SHA  $UNCOMPRESSED_IMG" > ../../SHA256SUMS
-          sha256sum *.img.xz | tee -a ../../SHA256SUMS
+          sha256sum *.img.xz | tee SHA256SUMS
           echo "download_file=$COMPRESSED_IMG" >> $GITHUB_OUTPUT
           echo "download_size=$COMPRESSED_SIZE" >> $GITHUB_OUTPUT
           echo "extract_size=$UNCOMPRESSED_SIZE" >> $GITHUB_OUTPUT
@@ -100,4 +99,4 @@ jobs:
           tag="image-test-${{ github.run_number }}"
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --prerelease \
             --title "Test image $tag" --notes "Test image, not for users." \
-            pi-gen/deploy/*.img.xz SHA256SUMS
+            pi-gen/deploy/*.img.xz pi-gen/deploy/SHA256SUMS
