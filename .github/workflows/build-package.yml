@@ -20,18 +20,60 @@ jobs:
   build:
     runs-on: ubuntu-24.04-arm
     container: debian:trixie
+    env:
+      PIGEN_REF: kosmos-trixie
+      REPO_DIR: ${{ inputs.repo_dir }}
     steps:
       - name: Tools
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            git ca-certificates build-essential devscripts equivs fakeroot
+            git ca-certificates build-essential devscripts equivs fakeroot gnupg
 
       - uses: actions/checkout@v7
         with:
           repository: KosmOS-Pi/${{ inputs.package }}
           ref: ${{ inputs.ref }}
           path: src
+
+      # Public keyring and expected fingerprint live in pi-gen (bootstrap files).
+      - uses: actions/checkout@v7
+        with:
+          repository: KosmOS-Pi/pi-gen
+          ref: ${{ env.PIGEN_REF }}
+          path: pigen
+          sparse-checkout: stage2/99-kosmos-setup/files
+
+      - name: KosmOS repositories as source of build dependencies
+        run: |
+          FILES=pigen/stage2/99-kosmos-setup/files
+          EXPECTED=$(tr -d '[:space:]' < "$FILES/kosmos-archive-keyring.fpr")
+          ACTUAL=$(gpg --show-keys --with-colons "$FILES/kosmos-bootstrap.pgp" \
+                   | awk -F: '$1=="fpr"{print $10; exit}')
+          echo "Expected primary fingerprint: $EXPECTED"
+          echo "Keyring primary fingerprint:  $ACTUAL"
+          [ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] \
+            || { echo "Keyring fingerprint mismatch"; exit 1; }
+          install -m 644 "$FILES/kosmos-bootstrap.pgp" /usr/share/keyrings/kosmos-build-keyring.pgp
+
+          # current: signed, verified with the keyring. testing: unsigned, trusted.
+          cat > /etc/apt/sources.list.d/kosmos-build.sources <<EOF
+          Types: deb
+          URIs: https://deb.kosmos-pi.org/$REPO_DIR/
+          Suites: trixie
+          Components: main
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/kosmos-build-keyring.pgp
+
+          Types: deb
+          URIs: https://deb.kosmos-pi.org/$REPO_DIR/
+          Suites: trixie-testing
+          Components: main
+          Architectures: arm64
+          Trusted: yes
+          EOF
+          apt-get update
+          apt-cache policy | grep -B1 -A2 deb.kosmos-pi.org || true
 
       - name: Version from changelog
         if: hashFiles('src/debian/changelog') != ''
@@ -56,6 +98,12 @@ jobs:
             mv ../*.deb "$OUT_DIR"/
           fi
           ls "$OUT_DIR"/*.deb
+
+      - name: KosmOS packages installed as build dependencies
+        run: |
+          dpkg-query -W -f='${Package} ${Version}\n' \
+            | grep -E '\+kosmos-[0-9]+~deb13$|-[0-9]+~deb13$' \
+            || echo "None: all build dependencies come from Debian."
 
       - name: Packages check
         run: |
