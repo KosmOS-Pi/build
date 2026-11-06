@@ -1,0 +1,264 @@
+name: promote
+on:
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "Source package names to promote, space separated (ex. libxisf libindi)"
+        required: true
+      repo_dir:
+        description: "Repo folder on server"
+        default: trixie
+
+# One group for the whole run: plan and promote must not be interleaved
+# with other jobs touching the same db/.
+concurrency:
+  group: kosmos-repo
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  TESTING: trixie-testing
+  CURRENT: trixie
+  OLD: trixie-old
+  PIGEN_REF: kosmos-trixie
+
+jobs:
+  # ---------------------------------------------------------------
+  # Job 1: compute and apply the promotion locally, WITHOUT signing.
+  # No signing key here, no approval needed: it can be used as a dry run.
+  # ---------------------------------------------------------------
+  plan:
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    timeout-minutes: 20
+    outputs:
+      changed: ${{ steps.apply.outputs.changed }}
+    env:
+      SFTP_HOST: ${{ secrets.SFTP_HOST }}
+      SFTP_USER: ${{ secrets.SFTP_USER }}
+      SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+      SFTP_KNOWN_HOSTS: ${{ secrets.SFTP_KNOWN_HOSTS }}
+      REPO_DIR: ${{ inputs.repo_dir }}
+      SOURCES: ${{ inputs.sources }}
+    steps:
+      - name: Tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            reprepro lftp openssh-client ca-certificates
+          reprepro --version
+
+      - name: Download conf, db and dists
+        run: |
+          mkdir -p /root/.ssh work
+          printf '%s\n' "$SFTP_KNOWN_HOSTS" > /root/.ssh/known_hosts
+          test -s /root/.ssh/known_hosts || { echo "SFTP_KNOWN_HOSTS is empty"; exit 1; }
+          lftp -u "$SFTP_USER,$SFTP_PASSWORD" "sftp://$SFTP_HOST" <<EOF
+          set cmd:fail-exit yes
+          set net:max-retries 3
+          set net:timeout 20
+          mirror --parallel=1 "$REPO_DIR/conf"  work/conf
+          mirror --parallel=1 "$REPO_DIR/db"    work/db
+          mirror --parallel=1 "$REPO_DIR/dists" work/dists
+          bye
+          EOF
+
+      - name: DB backup (before)
+        uses: actions/upload-artifact@v7
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: work/db
+          retention-days: 14
+
+      - name: Apply promotion locally
+        id: apply
+        run: |
+          cd work
+          # "name version" lines of a source in a codename
+          versions() {
+            reprepro -b . listfilter "$1" "\$Source (== $2)" | sed 's/^[^:]*: //' | sort
+          }
+          # upstream part only: strip epoch and the last "-<revision>"
+          upstreams() {
+            versions "$1" "$2" | awk '{print $2}' \
+              | sed -e 's/^[0-9]*://' -e 's/-[^-]*$//' | sort -u
+          }
+
+          changed=false
+          for src in $SOURCES; do
+            echo "::group::$src"
+            [[ "$src" =~ ^[a-z0-9][a-z0-9+.-]*$ ]] \
+              || { echo "Invalid source name: $src"; exit 1; }
+            filter="\$Source (== $src)"
+
+            new=$(versions "$TESTING" "$src")
+            cur=$(versions "$CURRENT" "$src")
+            echo "-- $TESTING:"; echo "$new"
+            echo "-- $CURRENT:"; echo "$cur"
+
+            [ -n "$new" ] || { echo "No package of source $src in $TESTING"; exit 1; }
+            if [ "$new" = "$cur" ]; then
+              echo "Already current: skip"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Never go backwards
+            while read -r n v; do
+              cv=$(awk -v n="$n" '$1==n{print $2}' <<< "$cur")
+              if [ -n "$cv" ] && dpkg --compare-versions "$v" lt "$cv"; then
+                echo "Downgrade: $n $v in testing is older than $cv in current"
+                exit 1
+              fi
+            done <<< "$new"
+
+            new_up=$(upstreams "$TESTING" "$src")
+            cur_up=$(upstreams "$CURRENT" "$src")
+            [ "$(printf '%s\n' "$new_up" | wc -l)" -eq 1 ] \
+              || { echo "Mixed upstream versions in $TESTING for $src: $new_up"; exit 1; }
+
+            if [ -z "$cur_up" ]; then
+              echo "First release of $src: copy to $CURRENT"
+            elif [ "$cur_up" != "$new_up" ]; then
+              echo "New upstream ($cur_up -> $new_up): $CURRENT moves to $OLD"
+              reprepro -b . --export=never removefilter "$OLD" "$filter"
+              reprepro -b . --export=never copyfilter "$OLD" "$CURRENT" "$filter"
+            else
+              echo "Same upstream ($new_up): packaging revision, $OLD untouched"
+            fi
+            reprepro -b . --export=never removefilter "$CURRENT" "$filter"
+            reprepro -b . --export=never copyfilter "$CURRENT" "$TESTING" "$filter"
+            changed=true
+            echo "::endgroup::"
+          done
+
+          {
+            echo "### Promotion result (not yet signed or uploaded)"
+            for cn in "$TESTING" "$CURRENT" "$OLD"; do
+              echo "**$cn**"
+              echo '```'
+              for src in $SOURCES; do versions "$cn" "$src"; done
+              echo '```'
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+      - name: Hand over the modified repo state
+        if: steps.apply.outputs.changed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: promotion-${{ github.run_id }}
+          path: |
+            work/conf
+            work/db
+            work/dists
+          retention-days: 1
+
+  # ---------------------------------------------------------------
+  # Job 2: sign and upload. Only job with the signing key; needs approval.
+  # ---------------------------------------------------------------
+  promote:
+    needs: plan
+    if: needs.plan.outputs.changed == 'true'
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    timeout-minutes: 15
+    environment: apt-signing
+    env:
+      SFTP_HOST: ${{ secrets.SFTP_HOST }}
+      SFTP_USER: ${{ secrets.SFTP_USER }}
+      SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+      SFTP_KNOWN_HOSTS: ${{ secrets.SFTP_KNOWN_HOSTS }}
+      APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+      REPO_DIR: ${{ inputs.repo_dir }}
+      LC_ALL: C
+    steps:
+      - name: Tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            reprepro lftp openssh-client ca-certificates gnupg gpgv git curl
+
+      - uses: actions/checkout@v7
+        with:
+          repository: KosmOS-Pi/pi-gen
+          ref: ${{ env.PIGEN_REF }}
+          path: pigen
+          sparse-checkout: stage2/99-kosmos-setup/files
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: promotion-${{ github.run_id }}
+          path: work
+
+      - name: Public keyring check
+        run: |
+          FILES=pigen/stage2/99-kosmos-setup/files
+          EXPECTED=$(tr -d '[:space:]' < "$FILES/kosmos-archive-keyring.fpr")
+          ACTUAL=$(gpg --show-keys --with-colons "$FILES/kosmos-bootstrap.pgp" \
+                   | awk -F: '$1=="fpr"{print $10; exit}')
+          [ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] \
+            || { echo "Keyring fingerprint mismatch"; exit 1; }
+          echo "KEYRING=$PWD/$FILES/kosmos-bootstrap.pgp" >> "$GITHUB_ENV"
+
+      - name: Import the signing subkey in a temporary keyring
+        run: |
+          test -n "$APT_SIGNING_KEY" || { echo "APT_SIGNING_KEY is empty"; exit 1; }
+          SUBKEY_FPR=$(awk '/^SignWith:/{print $2; exit}' work/conf/distributions)
+          echo "SignWith in conf/distributions: $SUBKEY_FPR"
+          [[ "$SUBKEY_FPR" =~ ^[0-9A-F]{40}$ ]] \
+            || { echo "SignWith is not a plain 40 hex fingerprint"; exit 1; }
+          GNUPGHOME=$(mktemp -d)
+          chmod 700 "$GNUPGHOME"
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          printf '%s\n' "$APT_SIGNING_KEY" | GNUPGHOME="$GNUPGHOME" gpg --batch --import
+          GNUPGHOME="$GNUPGHOME" gpg --list-secret-keys --keyid-format long \
+            --with-subkey-fingerprints | tee keys.txt
+          grep -q '^sec#' keys.txt || { echo "Primary key is NOT a stub: unexpected"; exit 1; }
+          grep -q "$SUBKEY_FPR" keys.txt || { echo "Subkey not found in keyring"; exit 1; }
+
+      - name: Export and sign current and old
+        run: |
+          # Explicit codenames only: never a bare "export".
+          reprepro -b work --gnupghome "$GNUPGHOME" export "$CURRENT" "$OLD"
+
+      - name: Verify signatures against the published keyring
+        run: |
+          for cn in "$CURRENT" "$OLD"; do
+            echo "== $cn"
+            gpgv --keyring "$KEYRING" "work/dists/$cn/InRelease"
+            gpgv --keyring "$KEYRING" "work/dists/$cn/Release.gpg" "work/dists/$cn/Release"
+          done
+
+      - name: Upload on server (db, then dists old and current)
+        run: |
+          mkdir -p /root/.ssh
+          printf '%s\n' "$SFTP_KNOWN_HOSTS" > /root/.ssh/known_hosts
+          test -s /root/.ssh/known_hosts || { echo "SFTP_KNOWN_HOSTS is empty"; exit 1; }
+          cd work
+          lftp -u "$SFTP_USER,$SFTP_PASSWORD" "sftp://$SFTP_HOST" <<EOF
+          set cmd:fail-exit yes
+          set net:max-retries 3
+          set net:timeout 20
+          mirror -R --delete --parallel=1 --exclude lockfile db "$REPO_DIR/db"
+          mirror -R --delete --parallel=1 "dists/$OLD" "$REPO_DIR/dists/$OLD"
+          mirror -R --delete --parallel=1 "dists/$CURRENT" "$REPO_DIR/dists/$CURRENT"
+          bye
+          EOF
+
+      - name: Verify what is published
+        run: |
+          for cn in "$CURRENT" "$OLD"; do
+            curl -fsS -o "/tmp/InRelease.$cn" \
+              "https://deb.kosmos-pi.org/$REPO_DIR/dists/$cn/InRelease"
+            gpgv --keyring "$KEYRING" "/tmp/InRelease.$cn"
+          done
+
+      - name: Cleanup
+        if: always()
+        run: |
+          gpgconf --kill gpg-agent || true
+          rm -rf "$GNUPGHOME" keys.txt
