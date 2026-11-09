@@ -1,0 +1,9 @@
+libxisf	https://gitea.nouspiro.space/nou/libXISF.git	main
+libbno08x	https://github.com/knro/libbno08x.git	master
+libindi	https://github.com/indilib/indi.git	master
+stellarsolver	https://github.com/rlancaste/stellarsolver.git	master
+kstars	https://invent.kde.org/education/kstars.git	master
+phd2	https://github.com/OpenPHDGuiding/phd2.git	master
+phdlogview	https://github.com/agalasso/phdlogview.git	master
+python3-indi-client	https://github.com/indilib/pyindi-client	master
+gsc	https://git.launchpad.net/gsc	master
