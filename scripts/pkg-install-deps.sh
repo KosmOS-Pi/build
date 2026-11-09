@@ -5,6 +5,25 @@ if [ ! -f debian/control ]; then
   exit 1
 fi
 
-sudo apt-get build-dep .
+# Simple install dep packages.
+#sudo apt-get build-dep .
 
+PKG=$( cat debian/control | grep 'Source:' | awk -F': ' '{ print $2 }' )
 
+# Generake a fake metapackage with all package deps.
+# Useful to uninstall build deps after build.
+
+# Needed packages
+sudo apt-get install -y devscripts equivs build-essential fakeroot
+
+# Produce fake meta-package here
+# mk-build-deps options:
+#  -i -> installs deps metapackage 
+#  -r -> removes deps metapackage after installation.
+#        A simple $ apt autoremove will uninstall uneeded packages.
+sudo mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control
+
+echo
+echo "Deps installed in package '$PKG-build-dep'."
+apt list $PKG-build-dep
+echo
