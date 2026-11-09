@@ -3,7 +3,7 @@
 # Usage: pkg-clone.sh <source-package>   (ex. pkg-clone.sh libindi)
 # NOT TESTED: try it in a scratch directory first.
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib-pkg.sh"
 
 GIT_BASE="${KOSMOS_GIT_BASE:-https://github.com/KosmOS-Pi}"
 

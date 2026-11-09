@@ -11,7 +11,7 @@
 # Run from dpkg-<name> or from its parent directory.
 # NOT TESTED: try it on a scratch clone first.
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib-pkg.sh"
 
 [ $# -ge 1 ] && [ $# -le 3 ] || die "Usage: $0 <source-package> [author-ref] [version]"
 name=$1; ref=${2:-}; version=${3:-}
