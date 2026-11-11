@@ -36,6 +36,7 @@ Le due sottochiavi di firma sono identiche: annotare subito quale è quella dell
 
 - `~/.gnupg/`: il keyring vero, con la primaria e le due sottochiavi di firma (CI e riserva).
 - Backup offline cifrato dell'export completo (`gpg --export-secret-keys --armor <FP_PRIMARIA>`), in due copie in luoghi diversi.
+- Backup su carta della chiave completa, ancora protetta dalla passphrase, in due forme (`paperkey` e QR armored): vedi §5.7.
 - `kosmos-primary-revoke.asc`: certificato di revoca della primaria, generato una volta e conservato offline.
 - `kosmos-archive-keyring.pgp`: chiave pubblica binaria, la stessa che finisce nel pacchetto.
 - `kosmos.gpg.asc` (chiave vecchia): resta quello per gli utenti bookworm e non va sostituito con la chiave nuova.
@@ -226,6 +227,37 @@ gpg --edit-key <FP_PRIMARIA>
 ### 5.6 Firma con `reprepro` [provato]
 
 `reprepro` accetta in `conf/distributions` il fingerprint della sottochiave **senza** `!` e firma con la sola sottochiave, senza la primaria. Nel workflow: `reprepro -b work --gnupghome "$GNUPGHOME" export trixie trixie-old` (§3.2).
+
+### 5.7 Backup su carta [provato, manca la firma di prova]
+
+Copia su carta della chiave segreta **completa** (primaria e le due sottochiavi di firma, CI e riserva), ancora protetta dalla passphrase. Quattro script in `build/scripts/`, tutti con prefisso `key-`, in due forme complementari:
+
+- `key-paper-backup.sh <FP_PRIMARIA> [cartella]`: usa `paperkey`; produce `paper.txt` (testo breve da stampare), `paper-qr.png` (un solo QR, corpo senza intestazione) e `public.pgp`. Ripristino: `key-paper-restore.sh <paper.txt|immagine QR> <public.pgp> [FP_PRIMARIA]`, che richiede la chiave pubblica.
+- `key-qr-backup.sh <FP_PRIMARIA> [cartella]`: export armored completo, spezzato per righe intere in più QR (`LINES_PER_QR`, default 10, correzione d'errore H, riga `KOSMOS-QR i/n` in testa a ciascuno); produce `qr-NN-of-NN.png`, `secret-armored.asc` (stesso contenuto in testo) e `public.asc`. Ripristino: `key-qr-restore.sh [-o file] [-f FP_PRIMARIA] <file>...`, con le parti in qualunque ordine; segnala quelle mancanti.
+
+Tutti gli script rispettano `GNUPGHOME` e lavorano in `/dev/shm`. Alla fine di ogni backup verificano da soli che i QR si decodifichino e che un ripristino in un keyring temporaneo dia gli stessi fingerprint.
+
+```bash
+# Backup (chiede la passphrase)
+scripts/key-paper-backup.sh <FP_PRIMARIA>
+scripts/key-qr-backup.sh <FP_PRIMARIA>
+
+# Ripristino in un keyring nuovo
+GNUPGHOME=/dev/shm/gnupg-nuovo scripts/key-paper-restore.sh paper-qr.png public.pgp <FP_PRIMARIA>
+GNUPGHOME=/dev/shm/gnupg-nuovo scripts/key-qr-restore.sh -f <FP_PRIMARIA> qr-*.png
+
+# Prova della passphrase sulla chiave ripristinata (deve chiederla e dare "Good signature")
+echo test | GNUPGHOME=/dev/shm/gnupg-nuovo gpg --local-user <FP_SUB>! --clearsign
+```
+
+Regole:
+
+- Non partire mai dalla copia CI senza passphrase (`ci-signing-subkey-nopass.asc`): non va mai stampata.
+- La passphrase non va sullo stesso foglio né nello stesso luogo.
+- Sul foglio annotare anche il fingerprint della primaria e quale sottochiave è CI e quale riserva; stampare anche `kosmos-primary-revoke.asc`.
+- Stampa in locale, senza code di stampa di rete o cloud; due copie in luoghi diversi.
+- I file prodotti stanno in `/dev/shm`: dopo la stampa `shred -u <cartella>/*` e `rmdir`.
+- Il ripristino con `paperkey` usa il `public.pgp` prodotto dal backup; il keyring pubblicato non è stato provato come sostituto.
 
 ## 6. Fingerprint: quali e dove pubblicarli
 
