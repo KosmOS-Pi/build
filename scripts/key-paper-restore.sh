@@ -42,4 +42,4 @@ echo
 gpg --list-secret-keys --keyid-format long --with-subkey-fingerprints "$pub_fpr"
 echo
 echo "Check the passphrase (it must be requested, and the signature must be good):"
-echo "  echo test | gpg --local-user ${pub_fpr}! --clearsign"
+echo "  echo test | gpg --local-user <FP_SUBKEY>! --clearsign   # <FP_SUBKEY>: una sottochiave [S] elencata sopra"
