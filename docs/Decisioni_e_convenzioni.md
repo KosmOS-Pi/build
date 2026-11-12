@@ -68,7 +68,7 @@ Elenco completo dei repository `dpkg-<nome>`: non va mai ridotto ai soli pacchet
 
 | # | Pacchetto | Tipo | Versione |
 | --- | --- | --- | --- |
-| 1 | `fxload` | upstream (patch FX3) | `+kosmos-N~deb13` |
+| 1 | `fxload` | upstream | `+kosmos-N~deb13` |
 | 2 | `libxisf` | upstream | `+kosmos-N~deb13` |
 | 3 | `libindi` | upstream | `+kosmos-N~deb13` |
 | 4 | `stellarsolver` | upstream | `+kosmos-N~deb13` |
