@@ -2,6 +2,8 @@
 BASE="trixie"
 WITH_POOL=no
 
+# Source hosting credentials file from CWD
+[ -f ftp.conf.sh ] || { echo "ftp.conf.sh (credentials filen) not found in $PWD"; exit 1; }
 source ftp.conf.sh
 
 if [ "$1" = "--with-pool" ]; then
