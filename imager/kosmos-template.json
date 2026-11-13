@@ -1,6 +1,6 @@
 {
   "imager": {
-    "latest_version": "2.0.3",
+    "latest_version": "2.0.12",
     "url": "https://www.raspberrypi.com/software/",
     "devices": [
       {
@@ -41,6 +41,7 @@
       "name": "KosmOS (64-bit)",
       "description": "RaspberryPi OS (trixie) with astronomy-targeted custom packages",
       "icon": "https://kosmos-pi.org/dl/kosmos-icon.png",
+      "website": "https://kosmos-pi.org",
       "init_format": "systemd",
       "devices": [
         "pi5-64bit",
