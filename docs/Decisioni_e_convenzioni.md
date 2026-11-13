@@ -94,6 +94,7 @@ Elenco completo dei repository `dpkg-<nome>`: non va mai ridotto ai soli pacchet
 | – | `kosmos-headless` | **eliminato** (sostituito da `video=` in `cmdline.txt`) | – |
 
 Ogni pacchetto nuovo va aggiunto qui, in `scripts/packages.tsv` (se ha un upstream) e nel TODO.
+Per i meta, `Depends` sul minimo che da senso al pacchetto, il resto in `Recommends`.
 
 ### 2.4. Versioning
 
@@ -156,7 +157,7 @@ Ogni pacchetto nuovo va aggiunto qui, in `scripts/packages.tsv` (se ha un upstre
   - `promote`: unico con la sottochiave (Environment `apt-signing`, approvazione richiesta); controlla il keyring contro il `.fpr`, importa la sottochiave, `export` esplicito di `trixie` e `trixie-old`, verifica con `gpgv`, upload (db, old, current), verifica di quanto pubblicato.
   - Regole per sorgente: mai downgrade; una sola versione upstream in `testing`; prima release → copia in `current`; **nuova upstream** → `current` passa in `old` (sostituendo `old` di quel sorgente) e `testing` va in `current`; **stessa upstream** (revisione di packaging) → `current` sostituito, `old` intatto.
 - Action: si tiene la major corrente quando GitHub segnala una deprecazione; dopo ogni aggiornamento si prova un run completo con un pacchetto nuovo.
-- `build/scripts/` contiene script di gestione locale, senza credenziali, per la sola macchina personale.
+- `build/scripts/` contiene script di gestione locale, senza credenziali nel repo, per la sola macchina personale. Gli script che necessitano di credenziali hosting, le leggono dal file `ftp.conf.sh` nella cartella da cui si lanciano.
 - Il build dell'immagine (`build-image`, solo `workflow_dispatch`, senza secret, `ubuntu-24.04-arm`) installa le dipendenze leggendo `pi-gen/depends` e, con `release` attivo, pubblica una pre-release di prova nel repo `build` (non come artifact, per la quota di storage). Le Release di prova si cancellano dal portale **insieme al tag** `image-test-N`.
 
 ### 2.9. Politica dei rilasci
@@ -185,20 +186,22 @@ Dettaglio operativo (comandi, file, rotazione, revoca) in «Chiavi di firma e ke
 ### 2.11. Immagine e primo avvio
 
 - pi-gen fino a **stage2** (`STAGE_LIST="stage0 stage1 stage2"`): Lite di circa 500 MB. Il resto si installa al primo avvio con `kosmos-setup.sh` (`kosmos-desktop`, `kosmos-mods`, `kosmos-astrophotography`).
+- `kosmos-setup.sh` presume che i Recommends dei meta-pacchetti siano installati; disattivare l'installazione automatica dei recommends prima del primo avvio non è supportato.
 - **Localizzazione, utente, WiFi**: l'immagine non conosce l'utente di destinazione, quindi `config` lascia i default di pi-gen (locale, fuso, tastiera) e non impone né country code né username. La documentazione prescrive di **usare rpi-imager** per preimpostare nome utente, WiFi e country, localizzazione e tastiera. Chi masterizza con un altro metodo deve fare il primo avvio con monitor, mouse e tastiera: parte l'onboarding di Raspberry Pi OS e chiede i dati essenziali.
 - L'utente `kosmonaut` (`FIRST_USER_NAME`) viene rinominato dall'onboarding, molto prima di `kosmos-setup`: quando si installa `kosmos-autologin` il nome è già definitivo. L'autologin SDDM sostituisce lo username reale in un file in `/etc/sddm.conf.d/`.
 - Senza `WPA_COUNTRY` il WiFi resta spento (NetworkManager `WirelessEnabled=false`) e `SelfHotspot` non parte: è il comportamento voluto in attesa del country code.
 - Il **repo KosmOS lo configura l'immagine**, non `kosmos-setup.sh`: in stage2 (`99-kosmos-setup/00-run.sh`, in chroot) un `kosmos-bootstrap.sources` provvisorio con `Signed-By` verso `kosmos-bootstrap.pgp` permette di installare `kosmos-archive-keyring` e `kosmos-apt-config` verificando la firma; poi i due file provvisori si cancellano (altrimenti doppio `Signed-By`). Gli script di pi-gen partono con `-e`, così un errore ferma il build. `kosmos-setup.sh` si limita a installare i pacchetti.
 - Il file `kosmos-archive-keyring.fpr` (fingerprint della primaria, una riga, 40 caratteri) è confrontato col keyring di bootstrap sia nei workflow sia nello script di pi-gen. Protegge dagli errori, non da un attacco (stesso repo); la protezione vera è il confronto con i canali di §2.10.
 - Il keyring di bootstrap va aggiornato a ogni modifica della chiave pubblica; esiste in tre copie (pacchetto, `pi-gen`, `keys/` sul server) che devono restare identiche.
-- Primo avvio: `kosmos-setup.service` (dopo `network-online.target`) lancia il wrapper, che usa file-flag in `/var/lib/kosmos-setup/` (`in-progress`, `no-network`, `failed`, `done`), attende la sincronizzazione NTP (max 60 s: senza RTC le firme risulterebbero «Not live yet»), e si riavvia da solo quando NetworkManager rileva la rete (dispatcher). `check-kosmos-setup` e il messaggio al login mostrano lo stato. A fine setup si abilita `vncserver-x11-serviced` e `graphical.target` come default.
+- Primo avvio: `kosmos-setup.service` (dopo `network-online.target`) lancia il wrapper, che usa file-flag in `/var/lib/kosmos-setup/` (`in-progress`, `no-network`, `failed`, `done`), attende la sincronizzazione NTP (max 60 s: senza RTC le firme risulterebbero «Not live yet»), e si riavvia da solo quando NetworkManager rileva la rete (dispatcher). `check-kosmos-setup` e il messaggio al login mostrano lo stato. A fine setup si abilita `vncserver-x11-serviced` e `graphical.target` come default. `vncserver-x11-serviced` viene in installato dal pacchetto `realvnc-vnc-server`, raccomandato da `kosmos-desktop`, installato al primo avvio dell'immagine.
 - `cloud-init` è installato ma `ENABLE_CLOUD_INIT` non è impostato; il catalogo usa `init_format: systemd`.
 - Catalogo rpi-imager: **prodotto da `build-image`** a ogni build e pubblicato nella stessa Release dell'immagine con `SHA256SUMS`. Il template `imager/kosmos-template.json` contiene i soli campi statici; i dinamici (`url`, `release_date`, `extract_size`, `extract_sha256`, `image_download_size`, `image_download_sha256`) li scrive `jq` (numeri con `--argjson`) e un `jq -e` fa fallire il passo se qualcosa è vuoto o zero. Lo step di checksum è diviso in «Uncompressed Checksums» (prima della compressione, `DEPLOY_COMPRESSION=none`) e «Compression and Checksums» (`xz`, rinomina `image_<nome>.xz`). Il tag `image-test-<run_number>` è definito una volta (`TAG`). Le Release sono di prova; per gli utenti servirà un URL fisso del catalogo, copiato al rilascio vero.
 
 ### 2.12. Sessione grafica e default del desktop
 
 - **X11, non Wayland** (compatibilità con KStars e VNC): `Session=plasmax11` (`plasma.desktop` è Wayland); `kosmos-desktop-defaults` dipende da `kwin-x11`.
-- I default valgono **solo per l'immagine KosmOS**: stanno in `kosmos-desktop-defaults` (`/etc/xdg/`, incluso in `kosmos-desktop`), non in pacchetti utili anche da soli. Il pacchetto dipende dai programmi che configura. Contiene solo impostazioni, nessun asset grafico.
+- I default valgono **solo per l'immagine KosmOS**: stanno in `kosmos-desktop-defaults` (`/etc/xdg/`, incluso in `kosmos-desktop`), non in pacchetti utili anche da soli. Il pacchetto dipende dai programmi che configura. Contiene solo impostazioni, nessun asset grafico. 
+- I default selezionano il tema KosmOS come look-and-feel, ma il pacchetto `kosmos-desktop-defaults` non dipende da `kosmos-plasma-theme`, in quanto in mancanza del tema Plasma ricade sul tema _Breeze_ per default.
 - Ordine dei metodi: (1) chiavi KConfig semplici in `/etc/xdg/`; (2) layout di Plasma nel look-and-feel di `kosmos-plasma-theme`; (3) `/etc/skel` solo per file che devono esistere nella home (si copia solo alla creazione dell'utente).
 - **Mai distribuire configurazioni generate da una sessione reale** (UUID, `$Version`, cache, geometrie, nomi file dell'utente).
 - Layout del pannello: `contents/layouts/org.kde.plasma.desktop-layout.js` dei look-and-feel (light e dark identici) carica il pannello di serie e modifica l'icona del lanciatore e `launchers` di `icontasks`. Le liste si passano come **array** (con una stringa compaiono dal secondo login). Voci: `preferred://browser`, `applications:<nome>.desktop`. Desktop senza icone.
